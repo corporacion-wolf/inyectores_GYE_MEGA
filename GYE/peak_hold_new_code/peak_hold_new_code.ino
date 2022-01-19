@@ -3,27 +3,29 @@
 /* Declaración de variables*/
 unsigned int peak = 6;
 
-unsigned int cont = 0;      // crea una variable numerica para el contador para el canal a
-unsigned int cont_b = 0;    // crea una variable numerica para el contador para el canal b 
+unsigned int cont = 0;          // crea una variable numerica para el contador para el canal a
+unsigned int cont_b = 0;        // crea una variable numerica para el contador para el canal b 
 
-unsigned int cont1 = 0;     // CONTADOR 1 DEL NUMERO DE RPMS DADAS PARA EL STROKEN
-unsigned int cont2 = 0;     // CONTADOR 2 DEL NUMERO DE RPMS DADAS PARA EL STROKEN
+unsigned int cont1 = 0;         // CONTADOR 1 DEL NUMERO DE RPMS DADAS PARA EL STROKEN
+unsigned int cont2 = 0;         // CONTADOR 2 DEL NUMERO DE RPMS DADAS PARA EL STROKEN
 
 String tipo = "L";              // tipo LATAM por defecto define peak en 6
 String numero = "A";            // ambos canales activos por defecto
 String modo = "M";              // modo automatico por defecto
 unsigned int on_off = 1;        // maquina on por defecto
-unsigned int dutty1 = 12;        // pulsos de hold 1
-unsigned int dutty2 = 18;        // pulsos de hold 2
-unsigned int freq1 = 300;     // antes conocida como remanente
-unsigned int stroken = 0;     // variable para determinar una cantidad fija de pulsos con Electrovalvulas
-unsigned int measure = 0;     // varaible para medir cantidad fija de pulsos
+unsigned int dutty1 = 12;       // pulsos de hold 1
+unsigned int dutty2 = 18;       // pulsos de hold 2
+unsigned int freq1 = 300;       // valor al que los contadores llegaran como maximo, por ende determina la frecuencia ya sea en modo manual o automatico
+unsigned int freq1_aux = 300;   // valor de frecuencia deseado que viene por el puerto serial, solo se pasara a calculos (freq1) siempre y cuando se encunetre en modo manual 
+unsigned int stroken = 0;       // variable para determinar una cantidad fija de pulsos con Electrovalvulas
+unsigned int measure = 0;       // varaible para medir cantidad fija de pulsos
     
-unsigned int temp = 0;        // variable auxiliar que intercambia si es modo manual o automatico en la interrupcion 
-unsigned int desfase = 0;     // Variable para el desfase del canal 2  -> para probar 10 equivale a un desfase de 500us = 0.5ms (wrt al pulso inicial)
-unsigned int desfase_aux = 0; // Variable para el desfase del canal 2  -> unicamente para lectura del UART
+unsigned int temp = 0;          // variable auxiliar que intercambia si es modo manual o automatico en la interrupcion 
+unsigned int desfase = 0;       // Variable para el desfase del canal 2  -> para probar 10 equivale a un desfase de 500us = 0.5ms (wrt al pulso inicial)
+unsigned int desfase_aux = 0;   // Variable para el desfase del canal 2  -> unicamente para lectura del UART
 
-unsigned long desf_calc = 0;  // variable auxiliar de calculos por overflow de desfase
+unsigned long desf_calc = 0;    // variable auxiliar de calculos por overflow de desfase
+unsigned long freq_calc = 0;    // variable auxiliar de calculos por freq1
 
 unsigned int frecuencia_aux = 0;
 unsigned int frecuencia_int = 0;
@@ -59,6 +61,8 @@ void setup()
 
   Serial.begin(9600);       // init serial 9600 bauds
   Serial.setTimeout(10000); // time out serial 10 segundos
+
+  _delay_ms(100);       // retardo de inicio antes de arrancar
 }
 
 void loop() 
@@ -69,41 +73,16 @@ void loop()
     descomponer_trama();    
     sincronizar_canales();
   }
-
-  /* Operaciones */
-  // calculo la frecuencia en base a C1 que viene del timer 4 - modo automatico
-  frecuencia_ext = 15625 / C1;
-  RPM_ext = frecuencia_ext*60;  
-
-  // calculo de la frecuencia que viene de la interfaz en modo manual
-  frecuencia_int = (unsigned int) ((20000 / frecuencia_aux));  
-  RPM_int = (unsigned int) (frecuencia_int * 60);
   
   valorx = random(0,99);
   valorx /= 100;
 
   /*Condiciones de la trama*/ 
   analizar_tipo_actuador();   // tipo de actuador
-  analizar_modo();        // analizar modo manual o automatico
-  analizar_on_off();      // on u off de la maquina peak and hold
+  analizar_modo();            // analizar modo manual o automatico
+  analizar_on_off();          // on u off de la maquina peak and hold
 
-  // conversion de frecuencia enviada desde PC de 0 a 360 en el desfase adecuado variando desde 0 a frecuencia 
-  if (modo == "M")
-  {
-    desf_calc = (unsigned long) desfase_aux;
-    desf_calc *= freq1;
-    desf_calc /= 360;
-  }
-  if (modo == "A")
-  {
- //   desf_calc = (unsigned long) desfase_aux * C1 * 32 / (9000);       // ecuacion de conversion de C1 de 0 a 15625 al desfase de 200 a 20000
-    desf_calc = (unsigned long) desfase_aux;
-    desf_calc *= C1;
-    desf_calc *= 32;
-    desf_calc /= 9000;
-  }
-
-  desfase = (unsigned int) desf_calc;
+  operaciones();
            
   Serial.println(cadena);
   _delay_ms(100);
@@ -174,16 +153,36 @@ void analizar_modo(void)
   if (modo == "M")      // MODO MANUAL
   {
     temp = 0x01;
-    cadena =  (String(RPM_int) + ',' + String(frecuencia_int) + ',' + String(desfase_aux) + ',' + String(stroken) + ',' + String(C1) + ',' + String(desfase));
+    cadena =  (String(RPM_int) + ',' + String(frecuencia_int) + ',' + String(freq1) + ',' + String(stroken) + ',' + String(C1) + ',' + String(desfase));
     digitalWrite(13, (bool) temp);    // imagen de la senal temp 
+    freq1 = (unsigned int) freq1_aux;                //si modo manual debemos pasar a calculos la frecuencia recibida por el puerto serial
+
+    // conversion de frecuencia enviada desde PC de 0 a 360 en el desfase adecuado variando desde 0 a frecuencia 
+    desf_calc = (unsigned long) desfase_aux;
+    desf_calc *= freq1;
+    desf_calc /= 360;
   }
   
   if (modo == "A")      // MODO AUTOMATICO
   {
     temp = 0x00;
-    cadena =  (String(RPM_ext) + ',' + String(frecuencia_ext) + ',' + String(desfase_aux) + ',' + String(stroken) + ',' + String(C1) + ',' + String(desfase));
+    cadena =  (String(RPM_ext) + ',' + String(frecuencia_ext) + ',' + String(freq1) + ',' + String(stroken) + ',' + String(C1) + ',' + String(desfase));
     digitalWrite(13, (bool) temp);    // imagen de la senal temp
+
+    // conversion de frecuencia contador maximo freq1 en el valor determinado por la frecuencia automatica del timer 4 
+    freq_calc = (unsigned long) C1;
+    freq_calc *= 32;
+    freq_calc /= 25;
+    freq1 = (unsigned int) freq_calc; 
+
+    // conversion de frecuencia enviada desde PC de 0 a 360 en el desfase adecuado variando desde 0 a frecuencia 
+    desf_calc = (unsigned long) desfase_aux;
+    desf_calc *= C1;
+    desf_calc *= 32;
+    desf_calc /= 9000;
   }
+
+  desfase = (unsigned int) desf_calc;
 }
 
 void analizar_on_off(void)
@@ -195,6 +194,8 @@ void analizar_on_off(void)
     EIMSK = 0B00000000;           // APAGAR LA INTERRUPCION INT0 PARA AHORRAR PROCESSING
     PORTA &= 0B10010100;          // CLEAR ALL 
     PORTC &= 0B00101001;          // CLEAR ALL 
+
+    frecuencia_aux = 0XFFFF;      // DEHAR FUERA DE RANGO AL CONTADOR DE FRECUENCIA PARA QUE SE PUEDA IR A CERO EL VALOR IMPRESO EN EL PUERTO SERIAL DE RPM INTERNAS
   }
   
   if(on_off == 1)  
@@ -251,7 +252,7 @@ void descomponer_trama(void)
     /*frecuencia*/
     temp_str = buffer_uart.substring(10,15);
     temp_int = temp_str.toInt();
-    freq1 = (unsigned int) temp_int;
+    freq1_aux = (unsigned int) temp_int;
 
     /*stroken*/
     temp_str = buffer_uart.substring(15,18);
@@ -267,6 +268,37 @@ void descomponer_trama(void)
     temp_str = buffer_uart.substring(21,22);
     temp_int = temp_str.toInt();
     measure = (unsigned int) temp_int;
+}
+
+void operaciones(void)
+{
+  /* Operaciones */
+  // calculo la frecuencia en base a C1 que viene del timer 4 - modo automatico
+  frecuencia_ext = 15625 / C1;
+  //RPM_ext = frecuencia_ext*60;
+  
+  if (C1 > 15)
+  {
+    RPM_ext = 62500 / C1;
+    RPM_ext *= 15;  
+  }
+  else 
+  {
+    RPM_ext = 62500;
+  }
+
+  // calculo de la frecuencia que viene de la interfaz en modo manual
+  frecuencia_int = (unsigned int) ((20000 / frecuencia_aux));  
+  
+  if (frecuencia_aux > 20)
+  {
+    RPM_int = (60000 / frecuencia_aux);
+    RPM_int *= 20;
+  }
+  else 
+  {
+    RPM_int = 60000;
+  }
 }
 
 //======================================================================
@@ -313,7 +345,7 @@ ISR(TIMER4_OVF_vect)
 
 ISR (TIMER0_COMPA_vect)
 {
-
+  // para stroken y calculo de la frecuencia
    if ((cont == 0))
     {
       if (numero != "T")
@@ -357,27 +389,32 @@ ISR (TIMER0_COMPA_vect)
     
     else if (cont < freq1)
       PORTA &= 0B11010100;      // CLEAR ALL keep cycle - FIN DEL CICLO
-  
-    else
-    {                                                             // aqui se debe corregir ya aque al cambiar contador se dana para la siguiente verificacion
-      PORTA &= 0B11010100;      // CLEAR ALL y fin de ciclo 
-      cont = 0XFFFF;
-    }
 
     if (aux_led > 1000 )              // periodo 1000 es de 50ms - se puede cambiar este limite si se desea tooglear el led mas rapido o mas lento 
     {
       PORTA ^= 0B01000000;            // TOGLEAMOS LED INDICADOR DE CICLO A EN FUNCIONAMIENTO
       aux_led = 0;
     }
+    aux_led++;                    // aumentamos contador de led cada 50us para los leds indicadores
   }
 
-  if ((temp == 0) && (cont >= (dutty1 + peak + 6)))       // si modo automatio y contador acabo el ciclo  PARA AGREGAR DESFASE EN A SE DEBERIA SUMAR EL DESFASE EN A A LA CONDICION 2
-      cont = 20000;                                       // Dejar el contador fuera del rango pero que no vuelva a cero para hacerlo con la INT0 = PARA DESFASE A SE DEBE SUMAR EL DESFASE MAXIMO AL 300     
+  if (cont >= freq1)
+    {                                                             // aqui se debe corregir ya aque al cambiar contador se dana para la siguiente verificacion
+      PORTA &= 0B11010100;                                        // CLEAR ALL y fin de ciclo 
+      cont = 0XFFFF;
+    }
+
+  if ((temp == 0) && (cont >= freq1))                     // si modo automatio y contador acabo el ciclo
+      cont = freq1;                                       // Dejar el contador fuera del rango o sea igual a freq1 pero que no vuelva a cero para hacerlo con la INT0 = PARA DESFASE A SE DEBE SUMAR EL DESFASE MAXIMO AL 300  0XFFFE   
       
   cont++;
-  aux_led++;                    // aumentamos contador de led cada 50us para los leds indicadores
 
 /*========= Canal B ========*/
+  cont_b = (cont - 1) + (freq1 - desfase);    // se adelanta al contador b el desfase necesario
+          
+  if (cont_b >= freq1)                      // se hace ciclear al contador b con la misma frecuencia del sistema freq1
+    cont_b = cont_b - freq1;
+
      if (cont_b == 0)
       PORTC |= 10000010;      // init cycle HIGH LEVEL
 
@@ -385,37 +422,6 @@ ISR (TIMER0_COMPA_vect)
   {    
 
   // DESFASE UNICAMENTE SI AMBOS CANALES ESTAN ACTIVADOS Y EL DESFASE SE CREA EN EL CANAL B
-      if (desfase < freq1 - dutty2 - peak - 6)
-      {    
-        if (cont_b < 2  + desfase)
-          PORTC &= 0B10101011;      // A & B & C LOW LEVEL
-      
-        else if (cont_b < peak  + desfase)  
-          PORTC |= 0B01000100;      // A & C HIGH LEVEL
-      
-        else if (cont_b < peak + 6  + desfase)
-          PORTC = 0B01111011;      // A LOW & B HIGH & C HIGH and keep cycle indicator & keep pull ups
-      
-        else if (cont_b < (dutty2 + peak + 6 + desfase))
-          PORTC ^= 0B00010000; 
-        
-        else if (cont_b < freq1)
-          PORTC &= 0B10101001;      // CLEAR ALL keep cycle
-      
-        else
-        {
-          PORTC &= 0B00101001;      // CLEAR ALL - fin de ciclo 
-          cont_b = 0XFFFF;
-        }
-      }
-
-      else                                        // se debe trabajar en esta parte cuando el desfase se acerca a la frecuencia no se debe perder la onda 
-      {
-        cont_b = cont - 1 + (freq1 - desfase);    // se adelanta al contador b el desfase necesario
-          
-        if (cont_b >= freq1)                      // se hace ciclear al contador b con la misma frecuencia del sistema freq1
-          cont_b = cont_b - freq1;
-        
         if (cont_b < 2)
           PORTC &= 0B10101011;      // A & B & C LOW LEVEL
       
@@ -430,33 +436,23 @@ ISR (TIMER0_COMPA_vect)
         
         else if (cont_b < freq1)
           PORTC &= 0B10101001;      // CLEAR ALL keep cycle
-      
-        else
-        {
-          PORTC &= 0B00101001;      // CLEAR ALL - fin de ciclo 
-          cont_b = 0xFFFF;
-        }
-      }
 
       if (aux_led2 > 1000 )             // periodo 1000 es de 50ms - se puede cambiar este limite si se desea tooglear el led mas rapido o mas lento 
       {
         PORTC ^= 0B10000000;            // TOGLEAMOS LED INDICADOR DE CICLO A EN FUNCIONAMIENTO
         aux_led2 = 0;
       }
+      aux_led2++;
   }
-  if ((temp == 0) && (cont_b >= (dutty2 + peak + 6 + desfase)))    // aqui toca aumentar mas desfase para no borrar el canal b analizar mejor ya que desfase si puede ser mayor a 300 creo que tocaria ponerle en algo mayior a 20.000 o tener contador A contrador B 
-      cont_b = 20000;                                              // Dejar el contador fuera del rango pero que no vuelva a cero para hacerlo con la INT0      
-      
-  cont_b++;
+
+    if (cont_b >= freq1)
+      PORTC &= 0B00101001;      // CLEAR ALL - fin de ciclo 
+
   cont_freq++;                        // incremento el contador de frecuencia para determinar la frecuencia interna 
-  aux_led2++;
 }
 
 ISR (INT0_vect)
 {
   if ((temp == 0) && (cont >= (dutty1 + peak + 6)))
     cont = 0;
-
-  if ((temp == 0) && (cont_b >= (dutty2 + peak + 6)))
-    cont_b = 0;
 }
