@@ -1,0 +1,11 @@
+consideraciones a tomar en cuenta
+
+ - El diodo en antiparalelo al actuador debe ser un diodo rapido Fast Recovery o Schotky.
+ - Probar el circuito con al amplificador AD620. La ganancia es de 50 pero la ganancia puede 
+modificada unicamente cambiando una resistencia. Ver formula en internet. 
+
+
+Aparentenemente hay corriente reamenenter en la bobina la cual no llega a ser descargada por el diodo
+Ejemplos de diodos rapidos FR107, UF4007. Recomendado a utilizar UF4004, Uf4006 o UF4007.
+
+ADC0 con arduino mega fue probado y funcional.  
